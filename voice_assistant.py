@@ -33,6 +33,9 @@ class VoiceAssistant:
         
         # 初始化麦克风和音频处理
         self.audio = pyaudio.PyAudio()
+
+
+        
         
         # 初始化Vosk语音识别模型
         model_path = os.getenv("VOSK_MODEL_PATH", "model")
