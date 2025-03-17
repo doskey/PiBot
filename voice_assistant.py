@@ -4,11 +4,10 @@
 import os
 import time
 import json
-import struct
 import wave
-import pyaudio
-import pvporcupine
-from vosk import Model, KaldiRecognizer
+import numpy as np
+import sounddevice as sd
+import whisper
 import ollama
 from dotenv import load_dotenv
 from gtts import gTTS
@@ -24,132 +23,147 @@ class VoiceAssistant:
         # 配置参数
         self.sample_rate = 16000
         self.frame_length = 512
-        self.wake_word = "picovoice"  # 默认唤醒词，您可以根据porcupine支持的唤醒词修改
+        self.wake_word = "小肚小肚"  # 使用语音识别来检测唤醒词
         self.silence_threshold = 2.0  # 句子结束后的静默时间阈值（秒）
         self.enable_voice_response = True  # 是否启用语音回答
-        self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")  # 使用环境变量或默认值
+        self.ollama_model = os.getenv("OLLAMA_MODEL", "llama2")  # 使用环境变量或默认值
         
-        # 初始化Ollama客户端（不需要额外初始化，直接使用ollama库即可）
+        # 初始化Whisper模型
+        print("正在加载Whisper模型，这可能需要一些时间...")
+        # 模型大小选项: tiny, base, small, medium, large
+        self.whisper_model = whisper.load_model("base")
+        print("成功加载Whisper模型")
         
-        # 初始化麦克风和音频处理
-        self.audio = pyaudio.PyAudio()
-
-
+    def transcribe_audio(self, audio_data):
+        """使用Whisper转录音频"""
+        # 保存音频到临时文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
+            temp_filename = temp_file.name
         
+        wf = wave.open(temp_filename, 'wb')
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16-bit audio
+        wf.setframerate(self.sample_rate)
+        wf.writeframes(audio_data.tobytes())
+        wf.close()
         
-        # 初始化Vosk语音识别模型
-        model_path = os.getenv("VOSK_MODEL_PATH", "model")
-        if not os.path.exists(model_path):
-            print(f"请下载Vosk模型并放置在 {model_path} 目录")
-            print("您可以从 https://alphacephei.com/vosk/models 下载中文模型")
-            exit(1)
-        
+        # 使用Whisper转录
         try:
-            self.model = Model(model_path)
-            print("成功加载Vosk模型")
+            result = self.whisper_model.transcribe(temp_filename, language="zh")
+            os.unlink(temp_filename)  # 删除临时文件
+            return result["text"]
         except Exception as e:
-            print(f"加载Vosk模型失败: {e}")
-            exit(1)
-        
-        # 初始化唤醒词检测器
-        access_key = os.getenv("PICOVOICE_ACCESS_KEY", "")
-        try:
-            self.porcupine = pvporcupine.create(
-                access_key=access_key,
-                keywords=[self.wake_word]
-            )
-        except Exception as e:
-            print(f"初始化唤醒词检测器失败: {e}")
-            print("请确保您有有效的Picovoice访问密钥")
-            exit(1)
+            print(f"转录错误: {e}")
+            os.unlink(temp_filename)  # 确保删除临时文件
+            return ""
     
     def listen_for_wake_word(self):
         """监听唤醒词"""
         print("正在监听唤醒词...")
+        print(f"唤醒词为: '{self.wake_word}', 请对着麦克风说这个词")
         
-        stream = self.audio.open(
-            rate=self.porcupine.sample_rate,
-            channels=1,
-            format=pyaudio.paInt16,
-            input=True,
-            frames_per_buffer=self.porcupine.frame_length
-        )
+        wake_word_detected = False
+        max_wait_time = 60  # 最多等待60秒
+        start_time = time.time()
+        audio_buffer = []
         
+        def audio_callback(indata, frames, time, status):
+            nonlocal audio_buffer
+            if status:
+                print(f"音频状态: {status}")
+            
+            # 检查声音音量
+            rms = np.sqrt(np.mean(indata**2))
+            if rms > 0.01:  # 如果有声音输入
+                print(f"检测到声音输入，音量: {rms:.4f}")
+                audio_buffer.append(indata.copy())
+        
+        # 持续监听5秒钟，然后处理
         try:
-            while True:
-                pcm = stream.read(self.porcupine.frame_length)
-                pcm = struct.unpack_from("h" * self.porcupine.frame_length, pcm)
+            while not wake_word_detected and time.time() - start_time < max_wait_time:
+                audio_buffer = []  # 清空缓冲区
                 
-                result = self.porcupine.process(pcm)
-                if result >= 0:
-                    print("检测到唤醒词!")
-                    break
-        finally:
-            stream.close()
+                # 录制5秒音频
+                with sd.InputStream(
+                    callback=audio_callback,
+                    channels=1,
+                    samplerate=self.sample_rate,
+                    blocksize=4000
+                ):
+                    # 录制大约5秒
+                    sd.sleep(5000)
+                
+                # 如果有足够的音频数据，进行转录
+                if len(audio_buffer) > 0:
+                    audio_data = np.concatenate(audio_buffer)
+                    
+                    # 转录音频
+                    transcription = self.transcribe_audio(audio_data)
+                    print(f"识别到: '{transcription}'")
+                    
+                    # 检查是否包含唤醒词
+                    if self.wake_word in transcription:
+                        print(f"匹配到唤醒词: '{self.wake_word}'")
+                        wake_word_detected = True
+                        break
+            
+            if wake_word_detected:
+                print("检测到唤醒词!")
+                return True
+            else:
+                print("等待唤醒词超时，请重新运行程序")
+                return False
+                
+        except Exception as e:
+            print(f"监听唤醒词时发生错误: {e}")
+            return False
     
     def record_command(self):
-        """录制用户命令直到句子结束"""
+        """录制用户命令"""
         print("请说出您的问题...")
         
-        rec = KaldiRecognizer(self.model, self.sample_rate)
-        stream = self.audio.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=self.sample_rate,
-            input=True,
-            frames_per_buffer=4000
-        )
+        audio_buffer = []
+        recording_duration = 10  # 录制最长10秒
         
-        frames = []
-        silence_frames = 0
-        speaking_started = False
-        last_text = ""
-        result_text = ""
-        
-        try:
-            while True:
-                data = stream.read(4000)
-                frames.append(data)
-                
-                if rec.AcceptWaveform(data):
-                    result = json.loads(rec.Result())
-                    if result.get("text", ""):
-                        speaking_started = True
-                        silence_frames = 0
-                        result_text = result["text"]
-                        print(f"识别中: {result_text}")
-                
-                # 检测静默以结束录音
-                if speaking_started:
-                    # 简单的静默检测 - 可以改进为基于音量的检测
-                    partial = json.loads(rec.PartialResult())
-                    if partial.get("partial") == last_text:
-                        silence_frames += 1
-                    else:
-                        last_text = partial.get("partial", "")
-                        silence_frames = 0
-                    
-                    # 如果连续多帧没有新内容，认为句子结束
-                    if silence_frames > int(self.silence_threshold * self.sample_rate / 4000):
-                        print("检测到句子结束")
-                        break
-        
-        finally:
-            stream.close()
+        def audio_callback(indata, frames, time, status):
+            if status:
+                print(status)
+            audio_buffer.append(indata.copy())
             
-        # 最后再处理一次剩余音频
-        rec.FinalResult()
+            # 打印音量，方便调试
+            rms = np.sqrt(np.mean(indata**2))
+            if rms > 0.01:
+                print(f"录音中，音量: {rms:.4f}")
+        
+        # 录制用户命令
+        with sd.InputStream(
+            callback=audio_callback,
+            channels=1,
+            samplerate=self.sample_rate,
+            blocksize=4000
+        ):
+            print("开始录音，请说话...")
+            # 等待用户说话并录制
+            sd.sleep(int(recording_duration * 1000))
         
         print("录音完成，正在处理...")
-        return result_text, frames
+        
+        if len(audio_buffer) > 0:
+            audio_data = np.concatenate(audio_buffer)
+            # 转录音频
+            transcription = self.transcribe_audio(audio_data)
+            return transcription, audio_buffer
+        else:
+            return "", []
     
     def save_audio(self, frames, filename="recorded_command.wav"):
         """保存录制的音频（可选功能）"""
+        audio_data = np.concatenate(frames, axis=0)
         wf = wave.open(filename, 'wb')
         wf.setnchannels(1)
-        wf.setsampwidth(self.audio.get_sample_size(pyaudio.paInt16))
+        wf.setsampwidth(2)  # 16-bit audio
         wf.setframerate(self.sample_rate)
-        wf.writeframes(b''.join(frames))
+        wf.writeframes(audio_data.tobytes())
         wf.close()
         print(f"已保存录音到 {filename}")
     
@@ -197,7 +211,8 @@ class VoiceAssistant:
         while True:
             try:
                 # 等待唤醒词
-                self.listen_for_wake_word()
+                if not self.listen_for_wake_word():
+                    continue  # 如果没有检测到唤醒词，重新开始循环
                 
                 # 录制用户命令
                 query, frames = self.record_command()
@@ -219,15 +234,10 @@ class VoiceAssistant:
                 break
             except Exception as e:
                 print(f"发生错误: {e}")
-    
-    def cleanup(self):
-        """清理资源"""
-        self.porcupine.delete()
-        self.audio.terminate()
 
 if __name__ == "__main__":
     assistant = VoiceAssistant()
     try:
         assistant.run()
-    finally:
-        assistant.cleanup() 
+    except KeyboardInterrupt:
+        print("\n程序已退出") 
