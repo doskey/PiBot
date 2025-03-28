@@ -9,7 +9,7 @@ import pyaudio
 import whisper
 import ollama
 from dotenv import load_dotenv
-from gtts import gTTS
+import pyttsx3
 from pydub import AudioSegment
 from pydub.playback import play
 import tempfile
@@ -29,7 +29,7 @@ class VoiceAssistant:
         # 初始化Whisper模型
         print("正在加载Whisper模型，这可能需要一些时间...")
         # 模型大小选项: tiny, base, small, medium, large
-        self.whisper_model = whisper.load_model("base")
+        self.whisper_model = whisper.load_model("small")
         print("成功加载Whisper模型")
         
         # 初始化麦克风和音频处理
@@ -158,20 +158,23 @@ class VoiceAssistant:
     def text_to_speech(self, text):
         """将文本转换为语音并播放"""
         try:
-            # 创建临时文件
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
-                temp_filename = temp_file.name
+            # 初始化 pyttsx3 引擎
+            engine = pyttsx3.init()
             
-            # 文字转语音
-            tts = gTTS(text=text, lang='zh-cn')
-            tts.save(temp_filename)
+            # 设置中文语音
+            voices = engine.getProperty('voices')
+            for voice in voices:
+                if 'chinese' in voice.name.lower():
+                    engine.setProperty('voice', voice.id)
+                    break
+            
+            # 设置语速
+            engine.setProperty('rate', 150)
             
             # 播放语音
-            sound = AudioSegment.from_mp3(temp_filename)
-            play(sound)
+            engine.say(text)
+            engine.runAndWait()
             
-            # 删除临时文件
-            os.unlink(temp_filename)
         except Exception as e:
             print(f"语音合成错误: {e}")
     
