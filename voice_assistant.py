@@ -26,7 +26,11 @@ class VoiceAssistant:
         self.enable_voice_response = True  # 是否启用语音回答
         self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")  # 使用环境变量或默认值
         
-        # 初始化Ollama客户端（不需要额外初始化，直接使用ollama库即可）
+        # 初始化Whisper模型
+        print("正在加载Whisper模型，这可能需要一些时间...")
+        # 模型大小选项: tiny, base, small, medium, large
+        self.whisper_model = whisper.load_model("base")
+        print("成功加载Whisper模型")
         
         # 初始化麦克风和音频处理
         self.audio = pyaudio.PyAudio()
@@ -48,7 +52,7 @@ class VoiceAssistant:
         print("开始录音")
     
     def record_command(self):
-        """录制用户命令直到句子结束"""
+        """录制用户命令"""
         print("请说出您的问题...")
         
         stream = self.audio.open(
@@ -125,11 +129,12 @@ class VoiceAssistant:
     
     def save_audio(self, frames, filename="recorded_command.wav"):
         """保存录制的音频（可选功能）"""
+        audio_data = np.concatenate(frames, axis=0)
         wf = wave.open(filename, 'wb')
         wf.setnchannels(1)
-        wf.setsampwidth(self.audio.get_sample_size(pyaudio.paInt16))
+        wf.setsampwidth(2)  # 16-bit audio
         wf.setframerate(self.sample_rate)
-        wf.writeframes(b''.join(frames))
+        wf.writeframes(audio_data.tobytes())
         wf.close()
         print(f"已保存录音到 {filename}")
     
@@ -208,5 +213,5 @@ if __name__ == "__main__":
     assistant = VoiceAssistant()
     try:
         assistant.run()
-    finally:
-        assistant.cleanup() 
+    except KeyboardInterrupt:
+        print("\n程序已退出") 
