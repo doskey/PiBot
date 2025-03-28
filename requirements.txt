@@ -1,7 +1,6 @@
-PyAudio==0.2.13
-pvporcupine==2.2.1
-vosk==0.3.45
-python-dotenv==1.0.0
-ollama==0.1.6
-gTTS==2.3.2
-pydub==0.25.1 
+PyAudio
+python-dotenv
+ollama
+gTTS
+pydub
+openai-whisper
