@@ -25,6 +25,7 @@ wheels/
 .installed.cfg
 *.egg
 model/
+vosk_model/
 
 # 系统文件
 .DS_Store
