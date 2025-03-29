@@ -7,22 +7,36 @@ import json
 import wave
 import pyaudio
 import ollama
-from dotenv import load_dotenv
 import numpy as np
+import io
+from dotenv import load_dotenv
 import nls  # 阿里云语音识别SDK
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
 
-# 加载环境变量
-load_dotenv()
 
 class VoiceAssistant:
+    """
+    基于阿里云语音服务和Ollama的语音助手
+    
+    功能:
+    - 语音唤醒（通过唤醒词）
+    - 语音指令识别
+    - LLM回答生成
+    - 语音合成回复
+    """
+
     def __init__(self):
-        # 配置参数
+        # 加载环境变量
+        load_dotenv()
+        
+        # 音频参数配置
         self.sample_rate = 16000
         self.silence_threshold = 1.0  # 从2.0秒降低到1.0秒，更快检测到句子结束
         self.silence_level = 300  # 静默音量阈值，低于此值被视为静默
         self.speaking_level = 800  # 说话音量阈值，高于此值被视为说话
+        
+        # 功能配置
         self.enable_voice_response = True  # 是否启用语音回答
         self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")  # 使用环境变量或默认值
         self.wake_word = os.getenv("WAKE_WORD", "你好机器人")  # 唤醒词
@@ -30,8 +44,8 @@ class VoiceAssistant:
         
         # 阿里云语音识别配置
         self.ali_url = os.getenv("ALI_URL", "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1")
-        self.ali_token = os.getenv("ALI_TOKEN", "")  # 从环境变量获取Token
-        self.ali_appkey = os.getenv("ALI_APPKEY", "")  # 从环境变量获取Appkey
+        self.ali_token = os.getenv("ALI_TOKEN", "")
+        self.ali_appkey = os.getenv("ALI_APPKEY", "")
         self.ali_ak_id = os.getenv("ALIYUN_AK_ID", "")
         self.ali_ak_secret = os.getenv("ALIYUN_AK_SECRET", "")
         self.token_expire_time = 0
@@ -55,8 +69,10 @@ class VoiceAssistant:
         self.recognition_completed = False
         
         # 初始化语音合成相关变量
-        self.tts_result = None
+        self.tts_buffer = None
         self.tts_completed = False
+    
+    # ===== 阿里云Token管理 =====
     
     def get_ali_token(self):
         """获取阿里云Token"""
@@ -95,25 +111,13 @@ class VoiceAssistant:
             print("Token即将过期，正在刷新...")
             self.get_ali_token()
     
-    # 阿里云语音识别回调函数
+    # ===== 语音识别回调函数 =====
+    
     def on_recognition_start(self, message, *args):
         """当一句话识别就绪时的回调函数"""
         print("识别开始:")
         self.recognition_result = ""
         self.recognition_completed = False
-    
-    def handle_wake_word(self, detected_from="未知位置"):
-        """统一处理唤醒词被检测到的情况"""
-        if not self.is_listening:  # 防止重复唤醒
-            self.is_listening = True
-            print(f"唤醒成功! [{detected_from}] 即将开始聆听指令...")
-            # 在检测到唤醒词后播放提示音
-            try:
-                self.text_to_speech("我在，您请提问：")
-            except Exception as e:
-                print(f"语音播放失败，但唤醒成功: {e}")
-            return True
-        return False
     
     def on_recognition_result_changed(self, message, *args):
         """当一句话识别返回中间结果时的回调函数"""
@@ -123,14 +127,13 @@ class VoiceAssistant:
         recognition_text = ""
         if "payload" in result and "result" in result["payload"]:
             recognition_text = result["payload"]["result"]
-            self.recognition_result = recognition_text
-            print(f"中间结果: {recognition_text}")
         elif "result" in result:
             recognition_text = result["result"]
-            self.recognition_result = recognition_text
-            print(f"中间结果: {recognition_text}")
         else:
             return
+            
+        self.recognition_result = recognition_text
+        print(f"中间结果: {recognition_text}")
             
         # 在回调中检查唤醒词，提高响应速度
         if not self.is_listening and self.wake_word.lower() in recognition_text.lower():
@@ -145,14 +148,14 @@ class VoiceAssistant:
         recognition_text = ""
         if "payload" in result and "result" in result["payload"]:
             recognition_text = result["payload"]["result"]
-            self.recognition_result = recognition_text
-            print(f"识别完成: {recognition_text}")
         elif "result" in result:
             recognition_text = result["result"] 
-            self.recognition_result = recognition_text
-            print(f"识别完成: {recognition_text}")
         else:
             print("无法解析完成结果")
+            recognition_text = ""
+            
+        self.recognition_result = recognition_text
+        print(f"识别完成: {recognition_text}")
             
         # 在完成回调中也检查唤醒词
         if not self.is_listening and self.wake_word.lower() in recognition_text.lower():
@@ -170,7 +173,8 @@ class VoiceAssistant:
         """当和云端连接断开时的回调函数"""
         print("识别连接关闭")
     
-    # 阿里云语音合成回调函数
+    # ===== 语音合成回调函数 =====
+    
     def on_tts_metainfo(self, message, *args):
         """语音合成元信息回调函数"""
         print(f"合成元信息: {message}")
@@ -178,7 +182,7 @@ class VoiceAssistant:
     def on_tts_data(self, data, *args):
         """语音合成数据回调函数"""
         # 将音频数据写入缓冲区
-        if hasattr(self, 'tts_buffer'):
+        if hasattr(self, 'tts_buffer') and self.tts_buffer:
             self.tts_buffer.write(data)
     
     def on_tts_completed(self, message, *args):
@@ -195,6 +199,23 @@ class VoiceAssistant:
         """语音合成连接关闭回调函数"""
         print("语音合成连接关闭")
     
+    # ===== 唤醒词处理 =====
+    
+    def handle_wake_word(self, detected_from="未知位置"):
+        """统一处理唤醒词被检测到的情况"""
+        if not self.is_listening:  # 防止重复唤醒
+            self.is_listening = True
+            print(f"唤醒成功! [{detected_from}] 即将开始聆听指令...")
+            # 在检测到唤醒词后播放提示音
+            try:
+                self.text_to_speech("我在，您请提问：")
+            except Exception as e:
+                print(f"语音播放失败，但唤醒成功: {e}")
+            return True
+        return False
+    
+    # ===== 核心功能 =====
+    
     def wait_for_wake_word(self):
         """使用阿里云一句话识别监听唤醒词"""
         print("\n正在等待唤醒词...")
@@ -205,16 +226,7 @@ class VoiceAssistant:
         self.check_token()
         
         # 创建阿里云识别器
-        recognizer = nls.NlsSpeechRecognizer(
-            url=self.ali_url,
-            token=self.ali_token,
-            appkey=self.ali_appkey,
-            on_start=self.on_recognition_start,
-            on_result_changed=self.on_recognition_result_changed,
-            on_completed=self.on_recognition_completed,
-            on_error=self.on_recognition_error,
-            on_close=self.on_recognition_close
-        )
+        recognizer = self._create_recognizer()
         
         stream = self.audio.open(
             format=pyaudio.paInt16,
@@ -261,16 +273,7 @@ class VoiceAssistant:
                         
                         # 重新开始识别
                         recognizer.stop()
-                        recognizer = nls.NlsSpeechRecognizer(
-                            url=self.ali_url,
-                            token=self.ali_token,
-                            appkey=self.ali_appkey,
-                            on_start=self.on_recognition_start,
-                            on_result_changed=self.on_recognition_result_changed,
-                            on_completed=self.on_recognition_completed,
-                            on_error=self.on_recognition_error,
-                            on_close=self.on_recognition_close
-                        )
+                        recognizer = self._create_recognizer()
                         recognizer.start(
                             aformat="pcm",
                             sample_rate=self.sample_rate,
@@ -295,15 +298,9 @@ class VoiceAssistant:
                 pass
             stream.close()
     
-    def record_command(self):
-        """使用阿里云一句话识别录制用户命令"""
-        print("请说出您的问题...")
-        
-        # 检查token是否有效
-        self.check_token()
-        
-        # 创建阿里云识别器
-        recognizer = nls.NlsSpeechRecognizer(
+    def _create_recognizer(self):
+        """创建并返回阿里云识别器实例"""
+        return nls.NlsSpeechRecognizer(
             url=self.ali_url,
             token=self.ali_token,
             appkey=self.ali_appkey,
@@ -313,6 +310,16 @@ class VoiceAssistant:
             on_error=self.on_recognition_error,
             on_close=self.on_recognition_close
         )
+    
+    def record_command(self):
+        """使用阿里云一句话识别录制用户命令"""
+        print("请说出您的问题...")
+        
+        # 检查token是否有效
+        self.check_token()
+        
+        # 创建阿里云识别器
+        recognizer = self._create_recognizer()
         
         stream = self.audio.open(
             format=pyaudio.paInt16,
@@ -387,9 +394,12 @@ class VoiceAssistant:
                 # 1. 连续静默帧超过阈值
                 # 2. 阿里云识别完成
                 # 3. 识别结果长时间没有更新且已经有内容
-                if (speaking_started and silence_frames > int(self.silence_threshold * self.sample_rate / 1024)) or \
+                silence_threshold_frames = int(self.silence_threshold * self.sample_rate / 1024)
+                no_update_threshold = int(2 * self.sample_rate / 1024)
+                
+                if (speaking_started and silence_frames > silence_threshold_frames) or \
                    self.recognition_completed or \
-                   (speaking_started and no_new_result_counter > int(2 * self.sample_rate / 1024) and self.recognition_result):
+                   (speaking_started and no_new_result_counter > no_update_threshold and self.recognition_result):
                     print("检测到句子结束")
                     recognizer.stop()
                     break
@@ -448,7 +458,11 @@ class VoiceAssistant:
             response = ollama.chat(
                 model=self.ollama_model,
                 messages=[
-                    {"role": "system", "content": "你是一个有用的助手，请简洁地回答用户的问题。用户问的问题可能是中文，也可能是英文。但是由于语音识别的缘故，用户的问题可能会有一些错误，比如语音识别错误，请根据错误进行纠正。"},
+                    {
+                        "role": "system", 
+                        "content": "你是一个有用的助手，请简洁地回答用户的问题。用户问的问题可能是中文，也可能是英文。"
+                                  "但是由于语音识别的缘故，用户的问题可能会有一些错误，比如语音识别错误，请根据错误进行纠正。"
+                    },
                     {"role": "user", "content": query}
                 ]
             )
@@ -465,7 +479,6 @@ class VoiceAssistant:
             self.check_token()
             
             # 准备一个内存缓冲区来存储音频数据
-            import io
             self.tts_buffer = io.BytesIO()
             self.tts_completed = False
             
@@ -541,21 +554,7 @@ class VoiceAssistant:
         print(f"阿里云URL: {self.ali_url}")
         
         # 检查麦克风是否正常工作
-        print("检查麦克风...")
-        try:
-            stream = self.audio.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=self.sample_rate,
-                input=True,
-                frames_per_buffer=1024
-            )
-            data = stream.read(1024)
-            if data:
-                print("麦克风正常工作")
-            stream.close()
-        except Exception as e:
-            print(f"麦克风可能有问题: {e}")
+        self._check_microphone()
         
         while True:
             try:
@@ -589,112 +588,139 @@ class VoiceAssistant:
                 print(f"发生错误: {e}")
                 self.is_listening = False
     
+    def _check_microphone(self):
+        """检查麦克风是否正常工作"""
+        print("检查麦克风...")
+        try:
+            stream = self.audio.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=self.sample_rate,
+                input=True,
+                frames_per_buffer=1024
+            )
+            data = stream.read(1024)
+            if data:
+                print("麦克风正常工作")
+            stream.close()
+        except Exception as e:
+            print(f"麦克风可能有问题: {e}")
+    
     def cleanup(self):
         """清理资源"""
         self.audio.terminate()
 
-if __name__ == "__main__":
+
+class TestState:
+    """用于测试模式的状态类"""
+    result = ""
+    completed = False
+
+
+def run_test_mode():
+    """运行测试模式，测试阿里云语音识别"""
+    print("======= 测试模式 =======")
+    print("测试阿里云一句话识别")
+    
+    # 创建助手实例
+    assistant = VoiceAssistant()
+    
+    # 检查配置
+    print(f"阿里云配置情况:")
+    print(f"  Token: {'已设置' if assistant.ali_token else '未设置'}")
+    print(f"  Appkey: {'已设置' if assistant.ali_appkey else '未设置'}")
+    print(f"  URL: {assistant.ali_url}")
+    
+    # 回调函数
+    def test_start(message, *args):
+        print(f"测试识别开始:")
+    
+    def test_result_changed(message, *args):
+        result = json.loads(message)
+        if "result" in result:
+            TestState.result = result["result"]
+            print(f"测试中间结果: {TestState.result}")
+    
+    def test_completed(message, *args):
+        result = json.loads(message)
+        if "result" in result:
+            TestState.result = result["result"]
+        print(f"测试识别完成: {TestState.result}")
+        TestState.completed = True
+    
+    def test_error(message, *args):
+        print(f"测试识别错误: {message}")
+        TestState.completed = True
+    
+    def test_close(*args):
+        print("测试识别连接关闭")
+    
+    try:
+        # 创建识别器
+        recognizer = nls.NlsSpeechRecognizer(
+            url=assistant.ali_url,
+            token=assistant.ali_token,
+            appkey=assistant.ali_appkey,
+            on_start=test_start,
+            on_result_changed=test_result_changed,
+            on_completed=test_completed,
+            on_error=test_error,
+            on_close=test_close
+        )
+        
+        print("创建麦克风流...")
+        p = pyaudio.PyAudio()
+        stream = p.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=16000,
+            input=True,
+            frames_per_buffer=1024
+        )
+        
+        print("开始测试识别...")
+        recognizer.start(
+            aformat="pcm",
+            sample_rate=16000,
+            enable_intermediate_result=True,
+            enable_punctuation_prediction=True
+        )
+        
+        print("请说话...")
+        # 记录30秒
+        for i in range(300):  # 30秒 = 300 * 0.1
+            data = stream.read(1024)
+            recognizer.send_audio(data)
+            print(".", end="", flush=True)
+            if i % 10 == 0:
+                print(f" {i//10}s", end="", flush=True)
+            if TestState.completed:
+                print("\n识别已完成")
+                break
+            time.sleep(0.1)
+        
+        print("\n停止识别...")
+        recognizer.stop()
+        stream.close()
+        p.terminate()
+        
+        print(f"\n最终识别结果: {TestState.result}")
+        print("测试完成!")
+    
+    except Exception as e:
+        print(f"测试时出错: {e}")
+
+
+def main():
+    """主函数"""
     # 关闭nls的日志跟踪
     nls.enableTrace(False)
     
-    # 测试模式 - 测试阿里云连接
+    # 检查是否为测试模式
     test_mode = os.getenv("TEST_MODE", "false").lower() == "true"
+    
     if test_mode:
-        print("======= 测试模式 =======")
-        print("测试阿里云一句话识别")
-        
-        # 创建助手实例
-        assistant = VoiceAssistant()
-        
-        # 检查配置
-        print(f"阿里云配置情况:")
-        print(f"  Token: {'已设置' if assistant.ali_token else '未设置'}")
-        print(f"  Appkey: {'已设置' if assistant.ali_appkey else '未设置'}")
-        print(f"  URL: {assistant.ali_url}")
-        
-        # 使用类变量而不是nonlocal
-        class TestState:
-            result = ""
-            completed = False
-        
-        # 回调函数
-        def test_start(message, *args):
-            print(f"测试识别开始:")
-        
-        def test_result_changed(message, *args):
-            result = json.loads(message)
-            if "result" in result:
-                TestState.result = result["result"]
-                print(f"测试中间结果: {TestState.result}")
-        
-        def test_completed(message, *args):
-            result = json.loads(message)
-            if "result" in result:
-                TestState.result = result["result"]
-            print(f"测试识别完成: {TestState.result}")
-            TestState.completed = True
-        
-        def test_error(message, *args):
-            print(f"测试识别错误: {message}")
-            TestState.completed = True
-        
-        def test_close(*args):
-            print("测试识别连接关闭")
-        
-        try:
-            # 创建识别器
-            recognizer = nls.NlsSpeechRecognizer(
-                url=assistant.ali_url,
-                token=assistant.ali_token,
-                appkey=assistant.ali_appkey,
-                on_start=test_start,
-                on_result_changed=test_result_changed,
-                on_completed=test_completed,
-                on_error=test_error,
-                on_close=test_close
-            )
-            
-            print("创建麦克风流...")
-            p = pyaudio.PyAudio()
-            stream = p.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=16000,
-                input=True,
-                frames_per_buffer=1024
-            )
-            
-            print("开始测试识别...")
-            recognizer.start(
-                aformat="pcm",
-                sample_rate=16000,
-                enable_intermediate_result=True,
-                enable_punctuation_prediction=True
-            )
-            
-            print("请说话...")
-            # 记录30秒
-            for i in range(300):  # 30秒 = 300 * 0.1
-                data = stream.read(1024)
-                recognizer.send_audio(data)
-                print(".", end="", flush=True)
-                if i % 10 == 0:
-                    print(f" {i//10}s", end="", flush=True)
-                if TestState.completed:
-                    print("\n识别已完成")
-                    break
-                time.sleep(0.1)
-            
-            print("\n停止识别...")
-            recognizer.stop()
-            stream.close()
-            p.terminate()
-            
-            print(f"\n最终识别结果: {TestState.result}")
-            print("测试完成!")
-        
-        except Exception as e:
-            print(f"测试时出错: {e}")
+        run_test_mode()
     else:
         # 正常模式
         assistant = VoiceAssistant()
@@ -703,4 +729,8 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("\n程序已退出") 
         finally:
-            assistant.cleanup() 
+            assistant.cleanup()
+
+
+if __name__ == "__main__":
+    main() 
