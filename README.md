@@ -29,6 +29,13 @@ cd <仓库文件夹>
 pip install -r requirements.txt
 ```
 
+```bash
+git clone https://github.com/aliyun/alibabacloud-nls-python-sdk
+cd alibabacloud-nls-python-sdk
+python -m pip install -r requirements.txt
+python -m pip install .
+```
+
 3. 创建配置文件：
 在项目根目录创建`.env`文件，填入以下信息：
 ```

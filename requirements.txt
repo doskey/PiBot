@@ -1,7 +1,6 @@
-PyAudio==0.2.13
-python-dotenv==1.0.0
-numpy==1.24.3
-requests==2.31.0
-aliyun-python-sdk-core==2.13.36
-aliyun-nls-python-sdk==0.0.1
-openai==1.3.0
+PyAudio
+python-dotenv
+numpy
+requests
+aliyun-python-sdk-core
+openai
