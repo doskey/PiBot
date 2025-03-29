@@ -6,18 +6,19 @@ import time
 import json
 import wave
 import pyaudio
-import ollama
+import requests
 import numpy as np
 import io
 from dotenv import load_dotenv
 import nls  # 阿里云语音识别SDK
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
+from openai import OpenAI
 
 
 class VoiceAssistant:
     """
-    基于阿里云语音服务和Ollama的语音助手
+    基于阿里云语音服务和阿里云百炼DeepSeek的语音助手
     
     功能:
     - 语音唤醒（通过唤醒词）
@@ -38,9 +39,20 @@ class VoiceAssistant:
         
         # 功能配置
         self.enable_voice_response = True  # 是否启用语音回答
-        self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")  # 使用环境变量或默认值
+        self.llm_api_key = os.getenv("DASHSCOPE_API_KEY", "")
+        self.llm_model = os.getenv("ALIYUN_LLM_MODEL", "deepseek-v3")
         self.wake_word = os.getenv("WAKE_WORD", "你好机器人")  # 唤醒词
         self.is_listening = False  # 是否处于主动监听状态
+        
+        # 检查阿里云百炼API配置
+        if not self.llm_api_key or self.llm_api_key == "":
+            print("警告：未设置阿里云百炼API密钥，请在.env文件中设置DASHSCOPE_API_KEY")
+        
+        # 初始化OpenAI客户端
+        self.openai_client = OpenAI(
+            api_key=self.llm_api_key,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
         
         # 阿里云语音识别配置
         self.ali_url = os.getenv("ALI_URL", "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1")
@@ -452,22 +464,33 @@ class VoiceAssistant:
         print(f"已保存录音到 {filename}")
     
     def get_llm_response(self, query):
-        """从Ollama获取回答"""
+        """从阿里云百炼DeepSeek获取回答"""
         try:
-            print(f"正在使用Ollama模型 {self.ollama_model} 处理问题...")
-            response = ollama.chat(
-                model=self.ollama_model,
+            print(f"正在使用阿里云百炼模型 {self.llm_model} 处理问题...")
+            
+            completion = self.openai_client.chat.completions.create(
+                model=self.llm_model,
                 messages=[
                     {
                         "role": "system", 
                         "content": "你是一个有用的助手，请简洁地回答用户的问题。用户问的问题可能是中文，也可能是英文。"
-                                  "但是由于语音识别的缘故，用户的问题可能会有一些错误，比如语音识别错误，请根据错误进行纠正。"
+                                  "但是由于语音识别的缘故，用户的问题可能会有语音识别错误，请尽可能的理解问题，并给出回答。"
                     },
                     {"role": "user", "content": query}
-                ]
+                ],
+                temperature=0.6,
+                max_tokens=4096
             )
-            answer = response['message']['content']
+            
+            # 提取模型回答
+            answer = completion.choices[0].message.content
+            
+            # 如果有推理过程，打印出来（仅供调试）
+            if hasattr(completion.choices[0].message, 'reasoning_content') and completion.choices[0].message.reasoning_content:
+                print(f"模型推理过程: {completion.choices[0].message.reasoning_content}")
+            
             return answer
+                
         except Exception as e:
             print(f"LLM响应错误: {e}")
             return "抱歉，我无法处理您的请求。"
@@ -550,8 +573,9 @@ class VoiceAssistant:
         """运行语音助手"""
         print("语音助手已启动")
         print(f"使用阿里云语音识别，Appkey: {self.ali_appkey}")
+        print(f"使用阿里云百炼DeepSeek模型: {self.llm_model}")
         print(f"唤醒词: {self.wake_word}")
-        print(f"阿里云URL: {self.ali_url}")
+        print(f"阿里云语音服务URL: {self.ali_url}")
         
         # 检查麦克风是否正常工作
         self._check_microphone()
