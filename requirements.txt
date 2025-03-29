@@ -1,6 +1,12 @@
 PyAudio
 python-dotenv
 ollama
-gTTS
-pydub
-openai-whisper
+vosk
+numpy
+pyttsx3
+scipy
+matplotlib
+Unidecode
+pyworld
+phonemizer
+librosa

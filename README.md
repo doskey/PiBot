@@ -5,10 +5,10 @@
 ## 功能特点
 
 - 使用USB麦克风实时监听声音
-- 检测唤醒词（默认为"picovoice"）
-- 使用Vosk本地模型进行语音识别，无需互联网
-- 使用本地Ollama服务运行的llama3.2模型生成回答
-- 使用gTTS将回答转换为语音并朗读出来（需要互联网连接，可选功能）
+- 使用Vosk本地模型检测唤醒词（默认为"你好机器人"）
+- 使用Vosk进行语音识别，完全离线运行
+- 使用本地Ollama服务运行的大语言模型生成回答
+- 使用pyttsx3将回答转换为语音并朗读出来（完全离线）
 
 ## 安装步骤
 
@@ -45,12 +45,10 @@ sudo apt-get update
 sudo apt-get install -y mpg123 portaudio19-dev
 
 # 如果使用树莓派，可能需要安装额外的依赖
-sudo apt-get install -y libopenblas-dev python3-full
+sudo apt-get install -y python3-full espeak
 ```
 
 ### 4. 创建虚拟环境并安装依赖
-
-在树莓派上，直接安装PyTorch可能会比较困难，建议使用官方的预编译包：
 
 ```bash
 # 创建虚拟环境
@@ -61,18 +59,23 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-#### 树莓派上的PyTorch安装说明
+### 5. 下载Vosk模型
 
-对于树莓派等ARM设备，可能需要使用特定的预编译包安装PyTorch：
+您需要下载Vosk模型用于语音识别：
 
 ```bash
-# 示例：在树莓派上安装PyTorch
-pip install https://github.com/Kashu7100/pytorch-armv7l/raw/main/torch-2.0.0a0+gite9ebda2-cp39-cp39-linux_armv7l.whl
+# 创建模型目录
+mkdir -p model
+
+# 下载中文小型模型
+wget https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip
+unzip vosk-model-small-cn-0.22.zip -d model
+mv model/vosk-model-small-cn-0.22/* model/
+rm -r model/vosk-model-small-cn-0.22
+rm vosk-model-small-cn-0.22.zip
 ```
 
-请访问[PyTorch官网](https://pytorch.org/get-started/locally/)获取最新的安装指南。
-
-### 5. 配置环境变量
+### 6. 配置环境变量
 
 将`.env.example`文件复制为`.env`，并填入您的配置：
 
@@ -82,11 +85,11 @@ cp .env.example .env
 ```
 
 您需要：
-- Picovoice访问密钥（从[https://picovoice.ai/](https://picovoice.ai/)获取，用于唤醒词检测）
-- Ollama模型名称（默认为llama3.2）
+- Ollama模型名称（默认为qwen2.5:3b）
 - Vosk模型路径（默认为"model"）
+- 唤醒词设置（默认为"你好机器人"）
 
-### 6. 运行助手
+### 7. 运行助手
 
 ```bash
 python voice_assistant.py
@@ -94,41 +97,41 @@ python voice_assistant.py
 
 ## 使用方法
 
-1. 启动程序后，等待初始化完成
-2. 说出唤醒词"picovoice"（您可以在代码中修改为其他受支持的唤醒词）
-3. 听到提示后，说出您的问题或指令
-4. 系统会使用本地Vosk模型进行语音识别，并通过Ollama的llama3.2模型生成回答
-5. 回答会以文本形式显示，并可选择通过语音朗读出来
-6. 按回车键可以开始新的对话
+1. 启动程序后，等待Vosk模型初始化完成
+2. 说出唤醒词"你好机器人"（您可以在.env文件中修改为其他词语）
+3. 听到"我在听"的提示后，说出您的问题或指令
+4. 系统会使用Vosk模型进行语音识别，并通过Ollama模型生成回答
+5. 回答会以文本形式显示，并通过语音朗读出来
 
 ## 自定义设置
 
-您可以在`voice_assistant.py`文件中修改以下参数：
+您可以在`.env`文件中修改以下参数：
 
-- `wake_word`: 更改唤醒词（需要是Porcupine支持的词）
+- `WAKE_WORD`: 更改唤醒词
+- `VOSK_MODEL_PATH`: Vosk模型路径
+- `OLLAMA_MODEL`: 使用的Ollama模型名称
+
+您也可以在`voice_assistant.py`文件中修改以下参数：
 - `silence_threshold`: 调整句子结束检测的静默时间阈值
 - `enable_voice_response`: 设置为False可以禁用语音回答
-- `ollama_model`: 可以在.env文件中修改使用的Ollama模型名称
-- `whisper_model`: 可以选择不同大小的Whisper模型（"tiny", "base", "small", "medium", "large"）
 
-## 关于Whisper语音识别
+## 语音识别系统
 
-Whisper是OpenAI开发的先进语音识别模型，具有以下特点：
+本项目完全使用Vosk进行语音识别，有以下特点：
+- 完全离线运行，无需互联网连接
+- 资源占用低，适合在树莓派等设备上运行
+- 支持自定义唤醒词，无需特殊训练
+- 唤醒速度快，延迟低
+- 多语言支持，支持中文识别
+- 适合在资源受限的环境中使用
 
-- 多语言支持，对中文识别效果出色
-- 较高的准确率，特别是在嘈杂环境中
-- 可以选择不同大小的模型以平衡准确性和性能：
-  - tiny: 约39MB，速度最快但准确度较低
-  - base: 约142MB
-  - small: 约465MB
-  - medium: 约1.5GB
-  - large: 约3GB，准确度最高但需要更多计算资源
-
-对于树莓派，建议使用tiny或base模型以获得更好的性能。
+Vosk模型有多种尺寸可供选择：
+- small：更快的处理速度，占用内存更少
+- large：更高的准确性，但需要更多内存
 
 ## 关于Ollama
 
-Ollama是一个在本地运行大型语言模型的开源工具。本项目默认使用llama2模型，但您可以根据需要使用其他Ollama支持的模型：
+Ollama是一个在本地运行大型语言模型的开源工具。本项目默认使用qwen2.5:3b模型，但您可以根据需要使用其他Ollama支持的模型：
 
 ```bash
 # 查看可用模型
@@ -161,14 +164,14 @@ ollama pull mistral
   ollama serve
   ```
 
-- 如果PyTorch安装困难，请尝试使用预编译的wheel包
+- 如果找不到Vosk模型，请确保已正确下载并解压到model目录中
 
 ## 注意事项
 
-- Whisper需要在首次运行时下载模型，请确保有网络连接
-- Whisper模型将保存在本地，之后可以离线使用
+- Vosk模型需要在首次运行时下载，请确保有网络连接
+- 模型将保存在本地，之后可以离线使用
 - 本地LLM（Ollama）不需要互联网连接
-- gTTS语音合成仍然需要互联网连接，如果需要完全离线解决方案，可以考虑使用其他本地TTS库
+- 使用pyttsx3的语音合成可以完全离线工作
 
 ## 许可证
 
