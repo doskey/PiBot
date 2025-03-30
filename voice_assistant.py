@@ -18,6 +18,7 @@ import oss2
 from oss2.credentials import EnvironmentVariableCredentialsProvider
 import uuid
 import datetime
+import subprocess
 
 
 
@@ -105,6 +106,7 @@ class VoiceAssistant:
         self.tts_completed = False
         
         # 图像识别配置
+        self.is_raspberry_pi = self._check_raspberry_pi()  # 检测是否为树莓派环境
         self.capture_device = os.getenv("CAPTURE_DEVICE", 0)  # 摄像头设备索引
         self.image_path = "captured_image.jpg"  # 临时保存路径
         self.vision_model = "qwen2.5-vl-32b-instruct"  # 视觉模型名称
@@ -698,33 +700,89 @@ class VoiceAssistant:
             print(f"OSS操作失败: {e}")
             return None
 
+    def _check_raspberry_pi(self):
+        """检测是否为树莓派环境"""
+        try:
+            if os.path.exists('/proc/device-tree/model'):
+                with open('/proc/device-tree/model', 'r') as f:
+                    model = f.read()
+                    if 'Raspberry Pi' in model:
+                        print("检测到树莓派环境:", model.strip())
+                        return True
+            return False
+        except Exception as e:
+            print(f"检测树莓派环境出错: {e}")
+            return False
+    
+    def _take_photo_with_libcamera(self):
+        """使用libcamera工具拍照（树莓派专用）"""
+        # 生成唯一的临时文件名
+        temp_image = f"/tmp/capture_{uuid.uuid4().hex[:8]}.jpg"
+        
+        # 使用libcamera命令拍照
+        print("正在使用libcamera拍照...")
+        cmd = f"libcamera-jpeg -o {temp_image} --width 1920 --height 1080 --nopreview -t 2000"
+        result = subprocess.run(cmd.split(), capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            error_msg = result.stderr if result.stderr else "未知错误"
+            raise Exception(f"libcamera拍照失败: {error_msg}")
+        
+        if not os.path.exists(temp_image):
+            raise Exception("拍照成功但未生成图片文件")
+        
+        print(f"libcamera拍照成功，保存至: {temp_image}")
+        return temp_image
+    
+    def _take_photo_with_opencv(self):
+        """使用OpenCV拍照"""
+        print("正在使用OpenCV拍照...")
+        cap = cv2.VideoCapture(self.capture_device)
+        if not cap.isOpened():
+            raise Exception(f"无法打开摄像头 {self.capture_device}")
+        
+        # 摄像头预热
+        print("摄像头预热中...")
+        time.sleep(3)
+        
+        # 拍照
+        ret, frame = cap.read()
+        cap.release()
+        
+        if not ret:
+            raise Exception("OpenCV拍照失败")
+        
+        # 保存临时文件
+        temp_image = f"/tmp/opencv_capture_{uuid.uuid4().hex[:8]}.jpg"
+        cv2.imwrite(temp_image, frame)
+        print(f"OpenCV拍照成功，保存至: {temp_image}")
+        
+        return temp_image
+    
     def handle_wake_takephoto(self):
         """处理环境识别唤醒（集成OSS上传）"""
         try:
-            # 拍照部分保持不变
             self.text_to_speech("正在拍摄环境照片")
-            cap = cv2.VideoCapture(self.capture_device)
-            if not cap.isOpened():
-                raise Exception("无法打开摄像头")
             
-            time.sleep(3)
-
-            ret, frame = cap.read()
-            if not ret:
-                raise Exception("拍照失败")
+            # 根据环境选择拍照方式
+            temp_image = None
+            if self.is_raspberry_pi:
+                try:
+                    temp_image = self._take_photo_with_libcamera()
+                except Exception as e:
+                    print(f"libcamera拍照失败: {e}, 尝试使用OpenCV拍照...")
+                    temp_image = self._take_photo_with_opencv()
+            else:
+                temp_image = self._take_photo_with_opencv()
             
-            cv2.imwrite(self.image_path, frame)
-            cap.release()
-            print(f"照片已保存至 {self.image_path}")
-
             # 上传到OSS
             self.text_to_speech("正在上传图片到云端")
-            oss_url = self._upload_to_oss(self.image_path)
+            oss_url = self._upload_to_oss(temp_image)
             if not oss_url:
                 raise Exception("图片上传失败")
             
-            # # 删除本地临时文件
-            os.remove(self.image_path)
+            # 删除本地临时文件
+            os.remove(temp_image)
             print("已清理本地临时文件")
 
             # 使用OSS URL进行识别
