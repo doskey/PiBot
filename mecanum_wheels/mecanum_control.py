@@ -15,19 +15,26 @@
 import time
 import sys
 
+# 检查BuildHAT库是否可用
 try:
     from buildhat import PassiveMotor
     BUILDHAT_AVAILABLE = True
 except ImportError:
     BUILDHAT_AVAILABLE = False
     print("警告: BuildHAT库未安装，请运行 'pip install buildhat'")
-    sys.exit(1)
+    # 不再强制退出，允许作为模块导入
+    # sys.exit(1)
 
 class MecanumWheels:
     """麦克纳姆轮控制类"""
     
-    def __init__(self):
-        """初始化四个轮子电机"""
+    def __init__(self, auto_init=True):
+        """初始化四个轮子电机
+        
+        Args:
+            auto_init: 是否自动初始化电机，默认为True。
+                       如果设为False，则需要手动调用_init_motors()
+        """
         self.motor_config = {
             'RF': {'port': 'A', 'motor': None},  # 右前轮
             'LF': {'port': 'B', 'motor': None},  # 左前轮
@@ -36,11 +43,21 @@ class MecanumWheels:
         }
         self.default_speed = 75  # 默认速度 (0-100)
         
+        # 检查BuildHAT库是否可用
+        if not BUILDHAT_AVAILABLE:
+            print("错误: BuildHAT库不可用，麦克纳姆轮将无法工作")
+            return
+            
         # 初始化所有电机
-        self._init_motors()
+        if auto_init:
+            self._init_motors()
     
     def _init_motors(self):
         """初始化所有电机"""
+        if not BUILDHAT_AVAILABLE:
+            print("错误: BuildHAT库不可用，无法初始化电机")
+            return False
+            
         for position, config in self.motor_config.items():
             try:
                 # 根据BuildHAT文档，PassiveMotor只接受port一个参数
@@ -52,7 +69,8 @@ class MecanumWheels:
             except Exception as e:
                 print(f"初始化{position}轮失败 (Port {config['port']}): {e}")
                 self.cleanup()
-                sys.exit(1)
+                return False
+        return True
     
     def _set_motor(self, position, direction, speed=None):
         """控制指定电机
@@ -135,7 +153,7 @@ class MecanumWheels:
         time.sleep(duration)
         self.stop()
     
-    def move_diagonal_right_forward(self, duration=1.0, speed=None):
+    def move_right_forward(self, duration=1.0, speed=None):
         """向右前方移动
         左前轮向前，右后轮向前
         """
@@ -148,7 +166,7 @@ class MecanumWheels:
         time.sleep(duration)
         self.stop()
     
-    def move_diagonal_left_forward(self, duration=1.0, speed=None):
+    def move_left_forward(self, duration=1.0, speed=None):
         """向左前方移动
         右前轮向前，左后轮向前
         """
@@ -161,7 +179,7 @@ class MecanumWheels:
         time.sleep(duration)
         self.stop()
     
-    def move_diagonal_right_backward(self, duration=1.0, speed=None):
+    def move_right_backward(self, duration=1.0, speed=None):
         """向右后方移动
         左前轮向后，右后轮向后
         """
@@ -174,7 +192,7 @@ class MecanumWheels:
         time.sleep(duration)
         self.stop()
     
-    def move_diagonal_left_backward(self, duration=1.0, speed=None):
+    def move_left_backward(self, duration=1.0, speed=None):
         """向左后方移动
         右前轮向后，左后轮向后
         """
@@ -187,7 +205,7 @@ class MecanumWheels:
         time.sleep(duration)
         self.stop()
     
-    def rotate_clockwise(self, duration=1.0, speed=None):
+    def rotate_right(self, duration=1.0, speed=None):
         """顺时针旋转
         右轮向后，左轮向前
         """
@@ -200,7 +218,7 @@ class MecanumWheels:
         time.sleep(duration)
         self.stop()
     
-    def rotate_counterclockwise(self, duration=1.0, speed=None):
+    def rotate_left(self, duration=1.0, speed=None):
         """逆时针旋转
         右轮向前，左轮向后
         """
@@ -231,22 +249,22 @@ class MecanumWheels:
         self.move_left(duration)
         time.sleep(0.5)
         
-        self.move_diagonal_right_forward(duration)
+        self.move_right_forward(duration)
         time.sleep(0.5)
         
-        self.move_diagonal_left_forward(duration)
+        self.move_left_forward(duration)
         time.sleep(0.5)
         
-        self.move_diagonal_right_backward(duration)
+        self.move_right_backward(duration)
         time.sleep(0.5)
         
-        self.move_diagonal_left_backward(duration)
+        self.move_left_backward(duration)
         time.sleep(0.5)
         
-        self.rotate_clockwise(duration)
+        self.rotate_right(duration)
         time.sleep(0.5)
         
-        self.rotate_counterclockwise(duration)
+        self.rotate_left(duration)
         
         print("测试完成")
     
@@ -296,9 +314,14 @@ class MecanumWheels:
                 except Exception as e:
                     print(f"停止{position}轮电机时出错: {e}")
 
-if __name__ == "__main__":
+def run_menu_system():
+    """运行交互菜单系统"""
     try:
         # 创建麦克纳姆轮控制对象
+        if not BUILDHAT_AVAILABLE:
+            print("错误: BuildHAT库不可用，无法启动菜单系统")
+            return
+            
         wheels = MecanumWheels()
         
         # 菜单系统
@@ -337,22 +360,22 @@ if __name__ == "__main__":
                 wheels.move_left(duration)
             elif choice == '5':
                 duration = float(input("持续时间(秒): "))
-                wheels.move_diagonal_right_forward(duration)
+                wheels.move_right_forward(duration)
             elif choice == '6':
                 duration = float(input("持续时间(秒): "))
-                wheels.move_diagonal_left_forward(duration)
+                wheels.move_left_forward(duration)
             elif choice == '7':
                 duration = float(input("持续时间(秒): "))
-                wheels.move_diagonal_right_backward(duration)
+                wheels.move_right_backward(duration)
             elif choice == '8':
                 duration = float(input("持续时间(秒): "))
-                wheels.move_diagonal_left_backward(duration)
+                wheels.move_left_backward(duration)
             elif choice == '9':
                 duration = float(input("持续时间(秒): "))
-                wheels.rotate_clockwise(duration)
+                wheels.rotate_right(duration)
             elif choice == '10':
                 duration = float(input("持续时间(秒): "))
-                wheels.rotate_counterclockwise(duration)
+                wheels.rotate_left(duration)
             elif choice == '11':
                 wheels.test_all_movements()
             elif choice == 'A':
@@ -377,3 +400,6 @@ if __name__ == "__main__":
         if 'wheels' in locals():
             wheels.cleanup()
         print("程序已退出")
+
+if __name__ == "__main__":
+    run_menu_system()

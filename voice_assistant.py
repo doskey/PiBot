@@ -19,6 +19,16 @@ from oss2.credentials import EnvironmentVariableCredentialsProvider
 import uuid
 import datetime
 import subprocess
+import re  # 用于正则表达式处理
+from mecanum_wheels import MecanumWheels
+
+# 条件导入BuildHAT库
+try:
+    from buildhat import PassiveMotor
+    BUILDHAT_AVAILABLE = True
+except ImportError:
+    BUILDHAT_AVAILABLE = False
+    print("警告: BuildHAT库未安装，电机控制功能将不可用")
 
 
 class WakeWord(Enum):
@@ -58,7 +68,7 @@ class VoiceAssistant:
 
         self.wake_words = [
             {'word': '你好机器人', 'handler': self.handle_wake_llm, 'cmd': WakeWord.WAKE_LLM},
-            {'word': '这是什么', 'handler': self.handle_wake_takephoto, 'cmd': WakeWord.WAKE_TAKEPHOTO},
+            {'word': '机器人这是什么', 'handler': self.handle_wake_takephoto, 'cmd': WakeWord.WAKE_TAKEPHOTO},
             {'word': '机器人出发', 'handler': self.handle_wake_move, 'cmd': WakeWord.WAKE_MOVE}
         ]
 
@@ -110,6 +120,15 @@ class VoiceAssistant:
         self.capture_device = os.getenv("CAPTURE_DEVICE", 0)  # 摄像头设备索引
         self.image_path = "captured_image.jpg"  # 临时保存路径
         self.vision_model = "qwen2.5-vl-32b-instruct"  # 视觉模型名称
+
+        # 初始化麦克纳姆轮
+        self.mecanum_wheels = None
+        if self.is_raspberry_pi and BUILDHAT_AVAILABLE:
+            try:
+                self.mecanum_wheels = MecanumWheels()
+                print("成功初始化麦克纳姆轮控制")
+            except Exception as e:
+                print(f"初始化麦克纳姆轮控制失败: {e}")
         
         # 添加OSS配置
         self.oss_auth = oss2.ProviderAuthV4(EnvironmentVariableCredentialsProvider())
@@ -607,6 +626,12 @@ class VoiceAssistant:
         
         # 检查麦克风是否正常工作
         self._check_microphone()
+
+        self.text_to_speech("你好，我是机器人。"
+                            "我已经准备就绪，请给我指令。"
+                            "可以说：你好机器人。然后向我提问。"
+                            "也可以说：机器人出发，然后我会开始移动。"
+                            "还可以说：机器人这是什么，然后我会拍一张照片，并识别照片中的主要物品。")
         
         while True:
             try:
@@ -872,23 +897,50 @@ class VoiceAssistant:
                 os.remove(self.image_path)
 
     def handle_wake_move(self):
-        """处理环境识别唤醒（集成OSS上传）"""
-
+        """处理移动指令，控制电机"""
         if self.enable_voice_response:
-            self.text_to_speech("好的，向什么方向移动？")
+            self.text_to_speech("好的，如何移动？")
 
         prompt, frames = self.record_command()
         if prompt:
             print(f"您说: {prompt}")
             response = self.get_llm_response(
                 prompt, 
-                system_prompt="你是一个机器人，请根据用户的问题，给出移动方向。把结果分解为：方向+距离。方向为：左、右、前、后。距离单位为厘米。方向一行，距离一行。不要给其它额外的内容")
+                system_prompt="你是一个机器人控制助手，请解析用户的指令，给出移动方向。把结果分解为：方向和时间。"
+                             "方向必须是：前、后、左转、右转、左、右、左前、右前、左后、右后其中的一个，不要用其他词。"
+                             "时间单位为秒，必须是数字。"
+                             "格式必须是两行：第一行为方向，第二行为时间（只要数字）。"
+                             "例如：\n左\n20")
             print(f"回答: {response}")
-            if self.enable_voice_response:
-                self.text_to_speech(response)
-        else:
-            print("未能识别您的问题，请重试")
 
+            response = response.split("\n")
+            direction = response[0]
+            duration = float(response[1])
+
+            self.text_to_speech(f"向{direction}移动{int(duration)}秒")
+
+            if direction == "前":
+                self.mecanum_wheels.move_forward(duration)
+            elif direction == "后":
+                self.mecanum_wheels.move_backward(duration)
+            elif direction == "左":
+                self.mecanum_wheels.move_left(duration)
+            elif direction == "右":
+                self.mecanum_wheels.move_right(duration)
+            elif direction == "左前":
+                self.mecanum_wheels.move_left_forward(duration)
+            elif direction == "右前":
+                self.mecanum_wheels.move_right_forward(duration)
+            elif direction == "左后":
+                self.mecanum_wheels.move_left_backward(duration)
+            elif direction == "右后":
+                self.mecanum_wheels.move_right_backward(duration)    
+            elif direction == "左转":
+                self.mecanum_wheels.rotate_left(duration)
+            elif direction == "右转":
+                self.mecanum_wheels.rotate_right(duration)
+            else:
+                self.text_to_speech("移动方向错误，请重试")
 
 def main():
     """主函数"""
