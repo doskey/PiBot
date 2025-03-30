@@ -6,3 +6,4 @@ aliyun-python-sdk-core
 openai
 oss2
 opencv-python
+buildhat
