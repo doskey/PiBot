@@ -105,7 +105,7 @@ class VoiceAssistant:
         self.tts_completed = False
         
         # 图像识别配置
-        self.capture_device = 1  # 摄像头设备索引
+        self.capture_device = os.getenv("CAPTURE_DEVICE", 0)  # 摄像头设备索引
         self.image_path = "captured_image.jpg"  # 临时保存路径
         self.vision_model = "qwen2.5-vl-32b-instruct"  # 视觉模型名称
         
