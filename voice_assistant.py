@@ -21,7 +21,6 @@ import datetime
 import subprocess
 
 
-
 class WakeWord(Enum):
     """
     唤醒词枚举类
@@ -29,7 +28,7 @@ class WakeWord(Enum):
     WAKE_NONE = 0
     WAKE_LLM = 1
     WAKE_TAKEPHOTO = 2
-
+    WAKE_MOVE = 3
 
 class VoiceAssistant:
     """
@@ -59,7 +58,8 @@ class VoiceAssistant:
 
         self.wake_words = [
             {'word': '你好机器人', 'handler': self.handle_wake_llm, 'cmd': WakeWord.WAKE_LLM},
-            {'word': '这是什么', 'handler': self.handle_wake_takephoto, 'cmd': WakeWord.WAKE_TAKEPHOTO}
+            {'word': '这是什么', 'handler': self.handle_wake_takephoto, 'cmd': WakeWord.WAKE_TAKEPHOTO},
+            {'word': '机器人出发', 'handler': self.handle_wake_move, 'cmd': WakeWord.WAKE_MOVE}
         ]
 
         self.is_listening = False  # 是否处于主动监听状态
@@ -491,7 +491,7 @@ class VoiceAssistant:
         
         return result_text, frames
     
-    def get_llm_response(self, query):
+    def get_llm_response(self, prompt, system_prompt=None):
         """从阿里云百炼DeepSeek获取回答"""
         try:
             print(f"正在使用阿里云百炼模型 {self.llm_model} 处理问题...")
@@ -501,10 +501,9 @@ class VoiceAssistant:
                 messages=[
                     {
                         "role": "system", 
-                        "content": "你是一个有用的助手，请简洁地回答用户的问题。用户问的问题可能是中文，也可能是英文。"
-                                  "但是由于语音识别的缘故，用户的问题可能会有语音识别错误，请尽可能的理解问题，并给出回答。"
+                        "content": system_prompt
                     },
-                    {"role": "user", "content": query}
+                    {"role": "user", "content": prompt}
                 ],
                 temperature=0.6,
                 max_tokens=4096
@@ -661,12 +660,15 @@ class VoiceAssistant:
             self.text_to_speech("你好，请提问：")
 
         # 录制用户命令
-        query, frames = self.record_command()
-        if query:
-            print(f"您说: {query}")
+        prompt, frames = self.record_command()
+        if prompt:
+            print(f"您说: {prompt}")
             
             # 获取LLM回答
-            response = self.get_llm_response(query)
+            response = self.get_llm_response(
+                prompt, 
+                system_prompt="你是一个有用的助手，请简洁地回答用户的问题。用户问的问题可能是中文，也可能是英文。"
+                                  "但是由于语音识别的缘故，用户的问题可能会有语音识别错误，请尽可能的理解问题，并给出回答。")
             print(f"回答: {response}")
             
             # 语音输出回答
@@ -868,6 +870,24 @@ class VoiceAssistant:
             # 确保清理本地文件
             if os.path.exists(self.image_path):
                 os.remove(self.image_path)
+
+    def handle_wake_move(self):
+        """处理环境识别唤醒（集成OSS上传）"""
+
+        if self.enable_voice_response:
+            self.text_to_speech("好的，向什么方向移动？")
+
+        prompt, frames = self.record_command()
+        if prompt:
+            print(f"您说: {prompt}")
+            response = self.get_llm_response(
+                prompt, 
+                system_prompt="你是一个机器人，请根据用户的问题，给出移动方向。把结果分解为：方向+距离。方向为：左、右、前、后。距离单位为厘米。方向一行，距离一行。不要给其它额外的内容")
+            print(f"回答: {response}")
+            if self.enable_voice_response:
+                self.text_to_speech(response)
+        else:
+            print("未能识别您的问题，请重试")
 
 
 def main():
