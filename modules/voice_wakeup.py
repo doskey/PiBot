@@ -158,9 +158,7 @@ class VoiceWakeup:
         try:
             # 开始识别
             recognizer.start(
-                aformat="pcm",
-                sample_rate=self.sample_rate,
-                enable_intermediate_result=True
+                enable_inverse_text_normalization=True # 启用数字转换功能
             )
             
             # 分片发送音频数据（模拟实时流）
@@ -239,6 +237,9 @@ class VoiceWakeup:
                     # 重置状态
                     is_speaking = False
                     audio_buffer = []
+
+                time.sleep(0.01)
+
         finally:
             stream.close()
 
@@ -280,10 +281,6 @@ class VoiceWakeup:
         try:
             # 开始识别
             recognizer.start(
-                aformat="pcm",
-                sample_rate=self.sample_rate,
-                enable_intermediate_result=True,
-                enable_punctuation_prediction=True,
                 enable_inverse_text_normalization=True  # 启用数字转换功能
             )
             
@@ -345,7 +342,8 @@ class VoiceWakeup:
                     print("检测到句子结束")
                     recognizer.stop()
                     break
-        
+
+                time.sleep(0.01)
         except Exception as e:
             print(f"录制命令时出错: {e}")
             try:

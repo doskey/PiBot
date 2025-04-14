@@ -100,6 +100,8 @@ class VoiceAssistant:
                     self.handle_wake_takephoto()
                 elif cmd == WakeWord.WAKE_MOVE:
                     self.handle_wake_move()
+
+                time.sleep(0.01)
                 
             except KeyboardInterrupt:
                 break
