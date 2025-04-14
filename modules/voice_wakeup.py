@@ -122,7 +122,7 @@ class VoiceWakeup:
 
                             break
             else:
-                print(f"无法从完成结果中提取文本，原始消息: {message}")
+                print(f"未检测到唤醒词")
             
             self.recognition_completed = True
         except Exception as e:
