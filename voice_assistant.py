@@ -337,6 +337,9 @@ class VoiceAssistant:
                     # 重置状态
                     is_speaking = False
                     audio_buffer = []
+                
+                time.sleep(0.1)
+
         finally:
             stream.close()
 
@@ -486,7 +489,8 @@ class VoiceAssistant:
                     print("检测到句子结束")
                     recognizer.stop()
                     break
-        
+
+                time.sleep(0.1)
         except Exception as e:
             print(f"录制命令时出错: {e}")
             try:
@@ -570,7 +574,7 @@ class VoiceAssistant:
                 aformat="wav",  # 使用wav格式
                 voice="aicheng",  # 默认使用小云音色
                 sample_rate=self.sample_rate,
-                volume=50,  # 音量，取值范围0~100
+                volume=80,  # 音量，取值范围0~100
                 speech_rate=0,  # 语速，取值范围-500~500
                 pitch_rate=0  # 语调，取值范围-500~500
             )
@@ -628,10 +632,7 @@ class VoiceAssistant:
         self._check_microphone()
 
         self.text_to_speech("你好，我是机器人。"
-                            "我已经准备就绪，请给我指令。"
-                            "可以说：你好机器人。然后向我提问。"
-                            "也可以说：机器人出发，然后我会开始移动。"
-                            "还可以说：机器人这是什么，然后我会拍一张照片，并识别照片中的主要物品。")
+                            "我已经准备就绪，请给我指令。")
         
         while True:
             try:
@@ -648,6 +649,8 @@ class VoiceAssistant:
                         wake_word['handler']()
                         break
                 
+                time.sleep(0.1)
+
             except KeyboardInterrupt:
                 break
             except Exception as e:
