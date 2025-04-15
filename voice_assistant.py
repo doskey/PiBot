@@ -635,7 +635,9 @@ class VoiceAssistant:
         print(f"阿里云语音服务URL: {self.ali_url}")
         
         # 检查麦克风是否正常工作
+        self.text_to_speech("正在检查系统...")
         self._check_microphone()
+        self.text_to_speech("所有功能正常")
 
 
         self.text_to_speech("你好，我是机器人。"
@@ -671,7 +673,6 @@ class VoiceAssistant:
     def _check_microphone(self):
         """检查麦克风是否正常工作"""
         print("检查麦克风...")
-        self.text_to_speech("正在检查麦克风...")
         try:
             stream = self.audio.open(
                 format=pyaudio.paInt16,
@@ -683,7 +684,6 @@ class VoiceAssistant:
             data = stream.read(1024)
             if data:
                 print("麦克风正常工作")
-                self.text_to_speech("麦克风工作正常")
             stream.close()
         except Exception as e:
             print(f"麦克风可能有问题: {e}")
@@ -804,8 +804,7 @@ class VoiceAssistant:
     def handle_wake_takephoto(self):
         """处理环境识别唤醒（集成OSS上传）"""
         try:
-            self.text_to_speech("准备拍照，请把需要拍照的物品放在摄像头前数到3")
-            time.sleep(3)
+            self.text_to_speech("准备拍照，请把需要拍照的物品放在摄像头前")
             
             # 根据环境选择拍照方式
             temp_image = None
@@ -817,6 +816,8 @@ class VoiceAssistant:
                     temp_image = self._take_photo_with_opencv()
             else:
                 temp_image = self._take_photo_with_opencv()
+
+            self.text_to_speech("拍照完成，正在处理图片...")
             
             # 上传到OSS
             oss_url = self._upload_to_oss(temp_image)
@@ -828,7 +829,7 @@ class VoiceAssistant:
             print("已清理本地临时文件")
 
             # 使用OSS URL进行识别
-            self.text_to_speech("开始分析图像内容，请稍候")
+            self.text_to_speech("开始分析图片内容，请稍候")
             completion = self.openai_client.chat.completions.create(
                 model=self.vision_model,
                 messages=[
