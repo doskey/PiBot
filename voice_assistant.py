@@ -347,6 +347,9 @@ class VoiceAssistant:
     
     def _process_audio_chunk(self, audio_data):
         """处理单个语音片段"""
+        # 检查token是否有效
+        self.check_token()
+
         # 直接创建识别器实例（原_create_recognizer方法的逻辑内联）
         recognizer = nls.NlsSpeechRecognizer(
             url=self.ali_url,
@@ -608,6 +611,8 @@ class VoiceAssistant:
             while data:
                 stream.write(data)
                 data = self.tts_buffer.read(1024)
+
+            time.sleep(0.5)
             
             # 关闭资源
             stream.stop_stream()
@@ -622,6 +627,7 @@ class VoiceAssistant:
     def run(self):
         """运行语音助手"""
         print("语音助手已启动")
+        self.text_to_speech("机器人已启动")
         print(f"使用阿里云语音识别，Appkey: {self.ali_appkey}")
         print(f"使用阿里云百炼模型: {self.llm_model}")
         for wake_word in self.wake_words:
@@ -631,11 +637,15 @@ class VoiceAssistant:
         # 检查麦克风是否正常工作
         self._check_microphone()
 
+
         self.text_to_speech("你好，我是机器人。"
                             "我已经准备就绪，请给我指令。")
         
         while True:
             try:
+                # 检查token是否有效
+                self.check_token()
+
                 # 等待唤醒词
                 self.is_listening = False
                 cmd = self.wait_for_wake_word()
@@ -646,6 +656,7 @@ class VoiceAssistant:
                 
                 for wake_word in self.wake_words:
                     if wake_word['cmd'] == cmd:
+                        self.text_to_speech(f"检测到唤醒词: {wake_word['word']}")
                         wake_word['handler']()
                         break
                 
@@ -660,6 +671,7 @@ class VoiceAssistant:
     def _check_microphone(self):
         """检查麦克风是否正常工作"""
         print("检查麦克风...")
+        self.text_to_speech("正在检查麦克风...")
         try:
             stream = self.audio.open(
                 format=pyaudio.paInt16,
@@ -671,9 +683,11 @@ class VoiceAssistant:
             data = stream.read(1024)
             if data:
                 print("麦克风正常工作")
+                self.text_to_speech("麦克风工作正常")
             stream.close()
         except Exception as e:
             print(f"麦克风可能有问题: {e}")
+            self.text_to_speech("麦克风可能有问题")
     
     def cleanup(self):
         """清理资源"""
@@ -684,14 +698,12 @@ class VoiceAssistant:
     def handle_wake_llm(self):
         """处理唤醒词被检测到的情况"""
 
-        if self.enable_voice_response:
-            self.text_to_speech("你好，请提问：")
+        self.text_to_speech("你好，请提问：")
 
         # 录制用户命令
         prompt, frames = self.record_command()
         if prompt:
-            print(f"您说: {prompt}")
-            
+            self.text_to_speech(f"您说: {prompt}。请让我思考一下。")
             # 获取LLM回答
             response = self.get_llm_response(
                 prompt, 
@@ -703,7 +715,7 @@ class VoiceAssistant:
             if self.enable_voice_response:
                 self.text_to_speech(response)
         else:
-            print("未能识别您的问题，请重试")
+            self.text_to_speech("未能识别您的问题，请重试")
 
     def _upload_to_oss(self, local_path):
         """使用预签名URL上传并返回可访问链接"""
@@ -792,7 +804,8 @@ class VoiceAssistant:
     def handle_wake_takephoto(self):
         """处理环境识别唤醒（集成OSS上传）"""
         try:
-            self.text_to_speech("正在拍摄环境照片")
+            self.text_to_speech("准备拍照，请把需要拍照的物品放在摄像头前数到3")
+            time.sleep(3)
             
             # 根据环境选择拍照方式
             temp_image = None
@@ -806,7 +819,6 @@ class VoiceAssistant:
                 temp_image = self._take_photo_with_opencv()
             
             # 上传到OSS
-            self.text_to_speech("正在上传图片到云端")
             oss_url = self._upload_to_oss(temp_image)
             if not oss_url:
                 raise Exception("图片上传失败")
@@ -888,7 +900,7 @@ class VoiceAssistant:
 
             # 合成剩余内容
             if response_buffer:
-                self.text_to_speech(response_buffer)
+                self.text_to_speech(f"分析完成，这个是 {response_buffer}")
 
             print("\n分析完成")
 
